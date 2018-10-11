@@ -9,31 +9,31 @@
  * @flow
  */
 
-import BlockingQueue from "./blocking-queue.js";
-import * as promise from "./promise.js";
-import { promisify } from "./promise.js";
-import map from "./map.js";
+import BlockingQueue from './BlockingQueue.js';
+import * as promise from './promise.js';
+import {promisify} from './promise.js';
+import map from './map.js';
 
-let path = require("path");
-let fs   = require("fs");
+const path = require('path');
+const fs = require('fs');
 
-export let lockQueue = new BlockingQueue("fs lock");
+export const lockQueue = new BlockingQueue('fs lock');
 
-export let readFileBuffer = promisify(fs.readFile);
-export let writeFile      = promisify(fs.writeFile);
-export let realpath       = promisify(fs.realpath);
-export let readdir        = promisify(fs.readdir);
-export let rename         = promisify(fs.rename);
-export let access         = promisify(fs.access);
-export let unlink         = promisify(require("rimraf"));
-export let mkdirp         = promisify(require("mkdirp"));
-export let exists         = promisify(fs.exists, true);
-export let lstat          = promisify(fs.lstat);
-export let chmod          = promisify(fs.chmod);
+export const readFileBuffer = promisify(fs.readFile);
+export const writeFile      = promisify(fs.writeFile);
+export const realpath       = promisify(fs.realpath);
+export const readdir        = promisify(fs.readdir);
+export const rename         = promisify(fs.rename);
+export const access         = promisify(fs.access);
+export const unlink         = promisify(require('rimraf'));
+export const mkdirp         = promisify(require('mkdirp'));
+export const exists         = promisify(fs.exists, true);
+export const lstat          = promisify(fs.lstat);
+export const chmod          = promisify(fs.chmod);
 
-let fsSymlink = promisify(fs.symlink);
-let invariant = require("invariant");
-let stripBOM  = require("strip-bom");
+const fsSymlink = promisify(fs.symlink);
+const invariant = require('invariant');
+const stripBOM = require('strip-bom');
 
 type CopyQueue = Array<{
   src: string,
@@ -55,9 +55,16 @@ type CopyEvents = {
   onStart: (num: number) => void
 };
 
-async function buildActionsForCopy(queue: CopyQueue, events: CopyEvents): Promise<CopyActions> {
+async function buildActionsForCopy(
+  queue: CopyQueue,
+  events: CopyEvents,
+  possibleExtraneousSeed: ?Iterable<string>,
+): Promise<CopyActions> {
+  const possibleExtraneous: Set<string> = new Set(possibleExtraneousSeed || []);
+  const files: Set<string> = new Set();
+
   // initialise events
-  for (let item of queue) {
+  for (const item of queue) {
     item.onDone = () => {
       events.onProgress(item.dest);
     };
@@ -65,25 +72,31 @@ async function buildActionsForCopy(queue: CopyQueue, events: CopyEvents): Promis
   events.onStart(queue.length);
 
   // start building actions
-  let actions: CopyActions = [];
-  await init();
-  return actions;
+  const actions: CopyActions = [];
 
   // custom concurrency logic as we're always executing stacks of 4 queue items
   // at a time due to the requirement to push items onto the queue
-  async function init(): Promise<CopyActions> {
-    let items = queue.splice(0, 4);
-    if (!items.length) return;
-
+  while (queue.length) {
+    const items = queue.splice(0, 4);
     await Promise.all(items.map(build));
-    return init();
   }
+
+  // remove all extraneous files that weren't in the tree
+  for (const loc of possibleExtraneous) {
+    if (!files.has(loc)) {
+      await unlink(loc);
+    }
+  }
+
+  return actions;
 
   //
   async function build(data) {
-    let { src, dest, onFresh } = data;
-    let onDone = data.onDone || (() => {});
-    let srcStat = await lstat(src);
+    let {src, dest, onFresh} = data;
+    const onDone = data.onDone || (() => {});
+    files.add(dest);
+
+    const srcStat = await lstat(src);
     let srcFiles;
 
     if (srcStat.isDirectory()) {
@@ -91,17 +104,19 @@ async function buildActionsForCopy(queue: CopyQueue, events: CopyEvents): Promis
     }
 
     if (await exists(dest)) {
-      let destStat = await lstat(dest);
+      const destStat = await lstat(dest);
 
-      let bothFiles   = srcStat.isFile() && destStat.isFile();
-      let bothFolders = !bothFiles && srcStat.isDirectory() && destStat.isDirectory();
+      const bothFiles   = srcStat.isFile() && destStat.isFile();
+      const bothFolders = !bothFiles && srcStat.isDirectory() && destStat.isDirectory();
 
       if (srcStat.mode !== destStat.mode) {
         if (bothFiles) {
           await access(dest, srcStat.mode);
         } else {
+          possibleExtraneous.delete(dest);
           await unlink(dest);
-          return build(data);
+          await build(data);
+          return;
         }
       }
 
@@ -113,14 +128,19 @@ async function buildActionsForCopy(queue: CopyQueue, events: CopyEvents): Promis
 
       if (bothFolders) {
         // remove files that aren't in source
-        let destFiles = await readdir(dest);
-        invariant(srcFiles, "src files not initialised");
+        const destFiles = await readdir(dest);
+        invariant(srcFiles, 'src files not initialised');
 
-        for (let file of destFiles) {
-          if (file === "node_modules") continue;
-
+        for (const file of destFiles) {
           if (srcFiles.indexOf(file) < 0) {
-            await unlink(path.join(dest, file));
+            const loc = path.join(dest, file);
+            possibleExtraneous.add(loc);
+
+            if ((await lstat(loc)).isDirectory()) {
+              for (const file of await readdir(loc)) {
+                possibleExtraneous.add(path.join(loc, file));
+              }
+            }
           }
         }
       }
@@ -129,63 +149,79 @@ async function buildActionsForCopy(queue: CopyQueue, events: CopyEvents): Promis
     if (srcStat.isDirectory()) {
       await mkdirp(dest);
 
+      const destParts = dest.split(path.sep);
+      while (destParts.length) {
+        files.add(destParts.join(path.sep));
+        destParts.pop();
+      }
+
       // push all files to queue
-      invariant(srcFiles, "src files not initialised");
+      invariant(srcFiles, 'src files not initialised');
       let remaining = srcFiles.length;
-      if (!remaining) onDone();
-      for (let file of srcFiles) {
+      if (!remaining) {
+        onDone();
+      }
+      for (const file of srcFiles) {
         queue.push({
           onFresh,
           src: path.join(src, file),
           dest: path.join(dest, file),
           onDone: () => {
-            if (--remaining === 0) onDone();
-          }
+            if (--remaining === 0) {
+              onDone();
+            }
+          },
         });
       }
     } else if (srcStat.isFile()) {
-      if (onFresh) onFresh();
+      if (onFresh) {
+        onFresh();
+      }
       actions.push({
         src,
         dest,
         atime: srcStat.atime,
         mtime: srcStat.mtime,
-        mode: srcStat.mode
+        mode: srcStat.mode,
       });
       onDone();
     } else {
-      throw new Error("unsure how to copy this?");
+      throw new Error('unsure how to copy this?');
     }
   }
 }
 
 export function copy(src: string, dest: string): Promise<void> {
-  return copyBulk([{ src, dest }]);
+  return copyBulk([{src, dest}]);
 }
 
-export async function copyBulk(queue: CopyQueue, _events?: CopyEvents): Promise<void> {
-  let events: CopyEvents = _events || {
+export async function copyBulk(
+  queue: CopyQueue,
+  _events?: CopyEvents,
+  possibleExtraneous?: Iterable<string>,
+): Promise<void> {
+  const events: CopyEvents = _events || {
     onStart: () => {},
     onProgress: () => {},
   };
 
-  let actions: CopyActions = await buildActionsForCopy(queue, events);
+  const actions: CopyActions = await buildActionsForCopy(queue, events, possibleExtraneous);
 
   events.onStart(actions.length);
 
   await promise.queue(actions, (data): Promise<void> => new Promise((resolve, reject) => {
-    let readStream = fs.createReadStream(data.src);
-    let writeStream = fs.createWriteStream(data.dest, { mode: data.mode });
+    const readStream = fs.createReadStream(data.src);
+    const writeStream = fs.createWriteStream(data.dest, {mode: data.mode});
 
-    readStream.on("error", reject);
-    writeStream.on("error", reject);
+    readStream.on('error', reject);
+    writeStream.on('error', reject);
 
-    writeStream.on("open", function () {
+    writeStream.on('open', function() {
       readStream.pipe(writeStream);
     });
 
-    writeStream.once("finish", function () {
-      fs.utimes(data.dest, data.atime, data.mtime, function (err) {
+    writeStream.once('finish', function() {
+      fs.utimes(data.dest, data.atime, data.mtime, function(err) {
         if (err) {
           reject(err);
         } else {
@@ -199,7 +235,7 @@ export async function copyBulk(queue: CopyQueue, _events?: CopyEvents): Promise<
 
 export async function readFile(loc: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    fs.readFile(loc, "utf8", function (err, content) {
+    fs.readFile(loc, 'utf8', function(err, content) {
       if (err) {
         reject(err);
       } else {
@@ -210,7 +246,7 @@ export async function readFile(loc: string): Promise<string> {
 }
 
 export async function readJson(loc: string): Promise<Object> {
-  let file = await readFile(loc);
+  const file = await readFile(loc);
   try {
     return map(JSON.parse(stripBOM(file)));
   } catch (err) {
@@ -220,10 +256,10 @@ export async function readJson(loc: string): Promise<Object> {
 }
 
 export async function find(filename: string, dir: string): Promise<string | false> {
-  let parts = dir.split(path.sep);
+  const parts = dir.split(path.sep);
 
   while (parts.length) {
-    let loc = parts.concat(filename).join(path.sep);
+    const loc = parts.concat(filename).join(path.sep);
 
     if (await exists(loc)) {
       return loc;
@@ -237,31 +273,35 @@ export async function find(filename: string, dir: string): Promise<string | fals
 
 export async function symlink(src: string, dest: string): Promise<void> {
   try {
-    let stats = await lstat(dest);
+    const stats = await lstat(dest);
 
     if (stats.isSymbolicLink() && await exists(dest)) {
-      let resolved = await realpath(dest);
-      if (resolved === src) return;
+      const resolved = await realpath(dest);
+      if (resolved === src) {
+        return;
+      }
     }
 
     await unlink(dest);
   } catch (err) {
-    if (err.code !== "ENOENT") throw err;
+    if (err.code !== 'ENOENT') {
+      throw err;
+    }
   }
 
   try {
-    if (process.platform === "win32") {
+    if (process.platform === 'win32') {
       // use directory junctions if possible on win32, this requires absolute paths
-      await fsSymlink(src, dest, "junction");
+      await fsSymlink(src, dest, 'junction');
     } else {
       // use relative paths otherwise which will be retained if the directory is moved
-      let relative = path.relative(path.dirname(dest), src);
+      const relative = path.relative(path.dirname(dest), src);
       await fsSymlink(relative, dest);
     }
   } catch (err) {
-    if (err.code === "EEXIST") {
+    if (err.code === 'EEXIST') {
       // race condition
-      return symlink(src, dest);
+      await symlink(src, dest);
     } else {
       throw err;
     }
@@ -274,13 +314,13 @@ export async function walk(dir: string, relativeDir?: string): Promise<Array<{
 }>> {
   let files = [];
 
-  for (let name of await readdir(dir)) {
-    let relative = relativeDir ? path.join(relativeDir, name) : name;
-    let loc = path.join(dir, name);
+  for (const name of await readdir(dir)) {
+    const relative = relativeDir ? path.join(relativeDir, name) : name;
+    const loc = path.join(dir, name);
     if ((await lstat(loc)).isDirectory()) {
       files = files.concat(await walk(loc, relative));
     } else {
-      files.push({ relative, absolute: loc });
+      files.push({relative, absolute: loc});
     }
   }
 

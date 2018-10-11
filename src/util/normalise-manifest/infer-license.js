@@ -14,15 +14,16 @@ const REGEXES = {
   ISC: [/The ISC License/, /ISC\b/],
   APACHE: [/Apache License\b/],
   MIT: [/MIT\b/],
-  BSD: [/BSD\b/]
+  BSD: [/BSD\b/],
 };
 
-export default function (license: string): ?string {
-  for (let licenseName in REGEXES) {
-    for (let regex of REGEXES[licenseName]) {
+export default function(license: string): ?string {
+  for (const licenseName in REGEXES) {
+    for (const regex of REGEXES[licenseName]) {
       if (regex.test(license)) {
         return `${licenseName}*`;
       }
     }
   }
+  return null;
 }

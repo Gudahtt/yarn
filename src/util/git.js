@@ -9,25 +9,25 @@
  * @flow
  */
 
-import type Config from "../config.js";
-import { MessageError, SecurityError } from "../errors.js";
-import { removeSuffix } from "./misc.js";
-import * as crypto from "./crypto.js";
-import * as child from "./child.js";
-import * as fs from "./fs.js";
-import map from "./map.js";
+import type Config from '../config.js';
+import {MessageError, SecurityError} from '../errors.js';
+import {removeSuffix} from './misc.js';
+import * as crypto from './crypto.js';
+import * as child from './child.js';
+import * as fs from './fs.js';
+import map from './map.js';
 
-let invariant = require("invariant");
-let semver    = require("semver");
-let url       = require("url");
-let tar       = require("tar");
+const invariant = require('invariant');
+const semver = require('semver');
+const url = require('url');
+const tar = require('tar');
 
 type GitRefs = {
   [name: string]: string
 };
 
-let supportsArchiveCache = map({
-  "github.com": false // not support, doubt they will ever support it
+const supportsArchiveCache = map({
+  'github.com': false, // not support, doubt they will ever support it
 });
 
 export default class Git {
@@ -57,18 +57,22 @@ export default class Git {
 
   static async hasArchiveCapability(gitUrl: string): Promise<boolean> {
     // USER@HOSTNAME:PATHNAME
-    let match = gitUrl.match(/^(.*?)@(.*?):(.*?)$/);
-    if (!match) return false;
+    const match = gitUrl.match(/^(.*?)@(.*?):(.*?)$/);
+    if (!match) {
+      return false;
+    }
 
     let [,, hostname] = match;
-    let cached = supportsArchiveCache[hostname];
-    if (cached != null) return cached;
+    const cached = supportsArchiveCache[hostname];
+    if (cached != null) {
+      return cached;
+    }
 
     try {
-      await child.spawn("git", ["archive", `--remote=${gitUrl}`, "HEAD", Date.now() + ""]);
-      throw new Error;
+      await child.spawn('git', ['archive', `--remote=${gitUrl}`, 'HEAD', Date.now() + '']);
+      throw new Error();
     } catch (err) {
-      let supports = err.message.indexOf("did not match any files") >= 0;
+      const supports = err.message.indexOf('did not match any files') >= 0;
       return supportsArchiveCache[hostname] = supports;
     }
   }
@@ -78,7 +82,7 @@ export default class Git {
    */
 
   static isCommitHash(target: string): boolean {
-    return !!target && /^[a-f0-9]{40}$/.test(target);
+    return !!target && /^[a-f0-9]{5,40}$/.test(target);
   }
 
   /**
@@ -92,17 +96,17 @@ export default class Git {
       return;
     }
 
-    let parts = url.parse(ref);
+    const parts = url.parse(ref);
 
-    if (parts.protocol === "git") {
+    if (parts.protocol === 'git') {
       throw new SecurityError(
-        `Refusing to download the git repo ${ref} over plain git without a commit hash`
+        `Refusing to download the git repo ${ref} over plain git without a commit hash`,
       );
     }
 
-    if (parts.protocol === "http:") {
+    if (parts.protocol === 'http:') {
       throw new SecurityError(
-        `Refusing to download the git repo ${ref} over HTTP without a commit hash`
+        `Refusing to download the git repo ${ref} over HTTP without a commit hash`,
       );
     }
   }
@@ -121,28 +125,28 @@ export default class Git {
   }
 
   async _cloneViaRemoteArchive(dest: string): Promise<void> {
-    await child.spawn("git", ["archive", `--remote=${this.url}`, this.ref], {
+    await child.spawn('git', ['archive', `--remote=${this.url}`, this.ref], {
       process(proc, update, reject, done) {
-        let extractor = tar.Extract({ path: dest });
-        extractor.on("error", reject);
-        extractor.on("end", done);
+        const extractor = tar.Extract({path: dest});
+        extractor.on('error', reject);
+        extractor.on('end', done);
 
         proc.stdout.pipe(extractor);
-        proc.on("error", reject);
-      }
+        proc.on('error', reject);
+      },
     });
   }
 
   async _cloneViaLocalFetched(dest: string): Promise<void> {
-    await child.spawn("git", ["archive", this.hash], {
+    await child.spawn('git', ['archive', this.hash], {
       cwd: this.cwd,
       process(proc, resolve, reject, done) {
-        let extractor = tar.Extract({ path: dest });
-        extractor.on("error", reject);
-        extractor.on("end", done);
+        const extractor = tar.Extract({path: dest});
+        extractor.on('error', reject);
+        extractor.on('end', done);
 
         proc.stdout.pipe(extractor);
-      }
+      },
     });
   }
 
@@ -151,15 +155,15 @@ export default class Git {
    */
 
   fetch(): Promise<void> {
-    let { url, cwd } = this;
+    let {url, cwd} = this;
 
     return fs.lockQueue.push(url, async () => {
       if (!(await fs.exists(cwd))) {
         await fs.mkdirp(cwd);
-        await child.spawn("git", ["init", "--bare"], { cwd });
+        await child.spawn('git', ['init', '--bare'], {cwd});
       }
 
-      await child.spawn("git", ["fetch", url, "--tags"], { cwd });
+      await child.spawn('git', ['fetch', url, '--tags'], {cwd});
 
       this.fetched = true;
     });
@@ -172,13 +176,13 @@ export default class Git {
   async findResolution(range: ?string, tags: Array<string>): Promise<string> {
     // If there are no tags and target is *, fallback to the latest commit on master
     // or if we have no target.
-    if (!range || (!tags.length && range === "*")) {
-      return "master";
+    if (!range || (!tags.length && range === '*')) {
+      return 'master';
     }
 
     return await this.config.resolveConstraints(
       tags.filter((tag): boolean => !!semver.valid(tag)),
-      range
+      range,
     ) || range;
   }
 
@@ -196,22 +200,22 @@ export default class Git {
 
   async _getFileFromArchive(filename: string): Promise<string | false> {
     try {
-      return await child.spawn("git", ["archive", `--remote=${this.url}`, this.ref, filename], {
+      return await child.spawn('git', ['archive', `--remote=${this.url}`, this.ref, filename], {
         process(proc, update, reject, done) {
-          let parser = tar.Parse();
+          const parser = tar.Parse();
 
-          parser.on("error", reject);
-          parser.on("end", done);
+          parser.on('error', reject);
+          parser.on('end', done);
 
-          parser.on("data", function (entry) {
+          parser.on('data', function(entry) {
             update(entry.toString());
           });
 
           proc.stdout.pipe(parser);
-        }
+        },
       });
     } catch (err) {
-      if (err.message.indexOf("did not match any files") >= 0) {
+      if (err.message.indexOf('did not match any files') >= 0) {
         return false;
       } else {
         throw err;
@@ -220,10 +224,10 @@ export default class Git {
   }
 
   async _getFileFromClone(filename: string): Promise<string | false> {
-    invariant(this.fetched, "Repo not fetched");
+    invariant(this.fetched, 'Repo not fetched');
 
     try {
-      return await child.spawn("git", ["show", `${this.hash}:${filename}`], { cwd: this.cwd });
+      return await child.spawn('git', ['show', `${this.hash}:${filename}`], {cwd: this.cwd});
     } catch (err) {
       // file doesn't exist
       return false;
@@ -246,8 +250,8 @@ export default class Git {
   }
 
   async setRefRemote(): Promise<string> {
-    let stdout = await child.spawn("git", ["ls-remote", "--tags", "--heads", this.url]);
-    let refs   = Git.parseRefs(stdout);
+    const stdout = await child.spawn('git', ['ls-remote', '--tags', '--heads', this.url]);
+    const refs   = Git.parseRefs(stdout);
     return await this.setRef(refs);
   }
 
@@ -257,12 +261,12 @@ export default class Git {
 
   async setRef(refs: GitRefs): Promise<string> {
     // get commit ref
-    let { hash } = this;
+    const {hash} = this;
 
-    let names = Object.keys(refs);
+    const names = Object.keys(refs);
 
     if (Git.isCommitHash(hash)) {
-      for (let name in refs) {
+      for (const name in refs) {
         if (refs[name] === hash) {
           this.ref = name;
           return hash;
@@ -274,14 +278,14 @@ export default class Git {
       return this.ref = this.hash = hash;
     }
 
-    let ref = await this.findResolution(hash, names);
-    let commit = refs[ref];
+    const ref = await this.findResolution(hash, names);
+    const commit = refs[ref];
     if (commit) {
       this.ref = ref;
       return this.hash = commit;
     } else {
       throw new MessageError(
-        `Could not find match for ${JSON.stringify(ref)} in ${names.join(",")} for ${this.url}`
+        `Could not find match for ${JSON.stringify(ref)} in ${names.join(',')} for ${this.url}`,
       );
     }
   }
@@ -292,18 +296,18 @@ export default class Git {
 
   static parseRefs(stdout: string): GitRefs {
     // store references
-    let refs = {};
+    const refs = {};
 
     // line delimetered
-    let refLines = stdout.split("\n");
+    const refLines = stdout.split('\n');
 
-    for (let line of refLines) {
+    for (const line of refLines) {
       // line example: 64b2c0cee9e829f73c5ad32b8cc8cb6f3bec65bb refs/tags/v4.2.2
       let [sha, id] = line.split(/\s+/g);
-      let [,, name] = id.split("/");
+      let [,, name] = id.split('/');
 
       // TODO: find out why this is necessary. idk it makes it work...
-      name = removeSuffix(name, "^{}");
+      name = removeSuffix(name, '^{}');
 
       refs[name] = sha;
     }

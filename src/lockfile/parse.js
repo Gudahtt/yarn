@@ -12,8 +12,8 @@
 
 import map from "../util/map.js";
 
-let invariant = require("invariant");
-let stripBOM  = require("strip-bom");
+const invariant = require("invariant");
+const stripBOM  = require("strip-bom");
 
 const TOKEN_TYPES = {
   boolean: "BOOLEAN",
@@ -25,7 +25,7 @@ const TOKEN_TYPES = {
   indent: "INDENT",
   invalid: "INVALID",
   number: "NUMBER",
-  comma: "COMMA"
+  comma: "COMMA",
 };
 
 const VALID_PROP_VALUE_TOKENS = [TOKEN_TYPES.boolean, TOKEN_TYPES.string, TOKEN_TYPES.number];
@@ -47,7 +47,7 @@ export function* tokenise(input: string): Iterator<Token> {
   let col = 0;
 
   function buildToken(type, value): Token {
-    return { line, col, type, value };
+    return {line, col, type, value};
   }
 
   while (input.length) {
@@ -81,8 +81,8 @@ export function* tokenise(input: string): Iterator<Token> {
       }
     } else if (input[0] === '"') {
       let val = "";
-      for (let i = 0;; i++) {
-        let char = input[i];
+      for (let i = 0; ; i++) {
+        const char = input[i];
         val += char;
         if (i > 0 && char === '"' && input[i - 1] !== "\\" && input[i - 2] !== "\\") {
           break;
@@ -122,7 +122,7 @@ export function* tokenise(input: string): Iterator<Token> {
     } else if (/^[a-zA-Z]/g.test(input)) {
       let name = "";
       for (let i = 0; i < input.length; i++) {
-        let char = input[i];
+        const char = input[i];
         if (char === ":" || char === " " || char === "\n" || char === ",") {
           break;
         } else {
@@ -158,7 +158,7 @@ export class Parser {
   tokens: Iterator<Token>;
 
   next(): Token {
-    let item = this.tokens.next();
+    const item = this.tokens.next();
     if (item.done) {
       throw new Error("No more tokens");
     } else if (item.value) {
@@ -190,13 +190,13 @@ export class Parser {
   }
 
   parse(indent: number = 0): Object {
-    let obj = map();
+    const obj = map();
 
     while (true) {
-      let propToken = this.token;
+      const propToken = this.token;
 
       if (propToken.type === TOKEN_TYPES.newline) {
-        let nextToken = this.next();
+        const nextToken = this.next();
         if (!indent) {
           // if we have 0 indentation then the next token doesn't matter
           continue;
@@ -224,36 +224,36 @@ export class Parser {
         break;
       } else if (propToken.type === TOKEN_TYPES.string) {
         // property key
-        let key = propToken.value;
+        const key = propToken.value;
         invariant(key, "Expected a key");
 
-        let keys = [key];
+        const keys = [key];
         this.next();
 
         // support multiple keys
         while (this.token.type === TOKEN_TYPES.comma) {
           this.next(); // skip comma
 
-          let keyToken = this.token;
+          const keyToken = this.token;
           if (keyToken.type !== TOKEN_TYPES.string) {
             this.unexpected("Expected string");
           }
 
-          let key = keyToken.value;
+          const key = keyToken.value;
           invariant(key, "Expected a key");
           keys.push(key);
           this.next();
         }
 
-        let valToken = this.token;
+        const valToken = this.token;
 
         if (valToken.type === TOKEN_TYPES.colon) { // object
           this.next();
 
           // parse object
-          let val = this.parse(indent + 1);
+          const val = this.parse(indent + 1);
 
-          for (let key of keys) {
+          for (const key of keys) {
             obj[key] = val;
           }
 
@@ -261,7 +261,7 @@ export class Parser {
             break;
           }
         } else if (isValidPropValueToken(valToken)) { // plain value
-          for (let key of keys) {
+          for (const key of keys) {
             obj[key] = valToken.value;
           }
 
@@ -278,9 +278,9 @@ export class Parser {
   }
 }
 
-export default function (str: string): Object {
+export default function(str: string): Object {
   str = stripBOM(str);
-  let parser = new Parser(str);
+  const parser = new Parser(str);
   parser.next();
   return parser.parse();
 }

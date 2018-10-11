@@ -9,43 +9,57 @@
  * @flow
  */
 
-import * as constants from "../constants.js";
-import * as child from "./child.js";
-import { registries } from "../resolvers/index.js";
-import type Config from "../config";
+import type Config from '../config';
+import * as constants from '../constants.js';
+import * as child from './child.js';
+import {registries} from '../resolvers/index.js';
+import type {Reporter} from '../reporters/index.js';
 
-let path = require("path");
+const path = require('path');
 
-export default async function (config: Config, cwd: string, cmds: Array<string>): Promise<Array<{
+export default async function (config: Config, cwd: string, cmds: Array<string>, reporter?: Reporter): Promise<Array<{
   cwd: string,
   command: string,
   stdout: string,
-  stderr: string
 }>> {
-  let results = [];
+  const results = [];
 
-  for (let cmd of cmds) {
-    let env = Object.assign({}, process.env);
+  for (const cmd of cmds) {
+    const env = Object.assign({}, process.env);
 
     // this is used in some places apparently..
-    env.npm_execpath = path.join(__dirname, "..", "..", "bin", "kpm.js");
+    env.npm_execpath = path.join(__dirname, '..', '..', 'bin', 'kpm.js');
 
     // split up the path
-    let pathParts = (env[constants.ENV_PATH_KEY] || "").split(path.delimiter);
+    const pathParts = (env[constants.ENV_PATH_KEY] || '').split(path.delimiter);
 
     // add node-gyp
-    pathParts.unshift(path.join(__dirname, "..", "..", "bin", "node-gyp-bin"));
+    pathParts.unshift(path.join(__dirname, '..', '..', 'bin', 'node-gyp-bin'));
 
     // add node_modules .bin
-    for (let registry of Object.keys(registries)) {
-      pathParts.unshift(path.join(cwd, config.registries[registry].folder, ".bin"));
+    for (const registry of Object.keys(registries)) {
+      pathParts.unshift(path.join(cwd, config.registries[registry].folder, '.bin'));
     }
 
     // join path back together
     env[constants.ENV_PATH_KEY] = pathParts.join(path.delimiter);
 
-    let [stdout, stderr] = await child.exec(cmd, { cwd, env });
-    results.push({ cwd, command: cmd, stdout, stderr });
+    let spinner;
+    if (reporter) {
+      spinner = reporter.activity();
+    }
+
+    let stdout = await child.spawn('sh', ['-c', cmd], {cwd, env}, (data) => {
+      if (spinner) {
+        spinner.tick(data.toString().trim().split('\n')[0]);
+      }
+    });
+
+    if (spinner) {
+      spinner.end();
+    }
+
+    results.push({cwd, command: cmd, stdout});
   }
 
   return results;

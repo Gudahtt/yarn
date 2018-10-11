@@ -9,26 +9,26 @@
  * @flow
  */
 
-import type { Reporter } from "../../reporters/index.js";
-import type Config from "../../config.js";
-import { Install } from "./install.js";
-import Lockfile from "../../lockfile/index.js";
+import type {Reporter} from '../../reporters/index.js';
+import type Config from '../../config.js';
+import {Install} from './install.js';
+import Lockfile from '../../lockfile/Lockfile.js';
 
 export function setFlags(commander: Object) {
   // TODO: support some flags that install command has
   commander;
 }
 
-export let noArguments = true;
-export let requireLockfile = true;
+export const noArguments = true;
+export const requireLockfile = true;
 
 export async function run(
   config: Config,
   reporter: Reporter,
   flags: Object,
-  args: Array<string>
+  args: Array<string>,
 ): Promise<void> {
-  let lockfile = new Lockfile(null, false);
-  let install = new Install("update", flags, args, config, reporter, lockfile);
+  const lockfile = new Lockfile(null, false);
+  const install = new Install('update', flags, args, config, reporter, lockfile);
   return install.init();
 }
